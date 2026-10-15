@@ -1,0 +1,11 @@
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY api/package.json ./api/package.json
+COPY web/package.json ./web/package.json
+RUN npm ci --workspace api --no-audit --no-fund
+COPY api ./api
+COPY db ./db
+ENV NODE_ENV=test
+USER node
+CMD ["npm", "run", "test:integration", "--workspace", "api"]

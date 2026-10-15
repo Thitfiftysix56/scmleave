@@ -1,0 +1,19 @@
+{
+  "name": "scm-leave",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace web",
+    "start": "npm run start --workspace api",
+    "migrate": "npm run migrate --workspace api",
+    "test": "npm run test --workspace api",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0 <25"
+  }
+}

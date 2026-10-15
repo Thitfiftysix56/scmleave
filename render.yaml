@@ -1,0 +1,38 @@
+# Optional Blueprint. Manual deployment is fully described in docs/DEPLOY_TH.md.
+services:
+  - type: web
+    name: scm-leave-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: '1'
+      - key: DB_SSL
+        value: 'true'
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        value: defaultdb
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL_CA
+        sync: false
+      - key: FILE_ENCRYPTION_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        value: SCM Administrator
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
