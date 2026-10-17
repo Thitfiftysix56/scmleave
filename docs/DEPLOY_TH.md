@@ -86,7 +86,7 @@ openssl rand -hex 16
 
 จดสองค่านี้ไว้ใน password manager โดยเฉพาะ **FILE_ENCRYPTION_KEY ต้องเก็บเดิมตลอดอายุฐานข้อมูล** เปลี่ยน/ทำหายแล้วจะถอดรหัสรูปเก่าไม่ได้ การ deploy ซ้ำไม่ต้องสุ่ม key ใหม่
 
-Bootstrap password ใช้สร้าง Super เฉพาะตอนที่ยังไม่มี Super ในฐานข้อมูล หลังผู้ใช้เปลี่ยนรหัสแล้ว การ deploy/migrate ซ้ำจะไม่รีเซ็ตรหัสนั้น
+Bootstrap password ใช้สร้าง Admin เฉพาะตอนที่ยังไม่มี Admin หรือ Super ในฐานข้อมูล หลังผู้ใช้เปลี่ยนรหัสแล้ว การ deploy/migrate ซ้ำจะไม่รีเซ็ตรหัสนั้น
 
 ## 4. สร้าง Render Web Service
 
@@ -200,7 +200,7 @@ Preview URL ของ Pages ที่มี hash เป็น origin อีก�
 4. เลือกนำเข้าจาก Google เฉพาะวันหยุดที่บริษัทใช้ ตรวจรายการซ้ำ กรอกแหล่งอ้างอิง แล้วกดยืนยันปฏิทิน
 5. ให้เพื่อนสมัครบัญชีจาก URL Pages ของคุณ
 6. เปิดใช้งานแต่ละบัญชีและตรวจวันหยุดปกติในหน้าสมาชิก
-7. กำหนดสิทธิ์รายปี และมอบหมาย Super คนที่สองสำหรับอนุมัติคำขอของ Super
+7. กำหนดสิทธิ์รายปี โดยให้ Admin หรือ Super อีกคนอนุมัติคำขอของ Super
 8. ทดลองส่งวันลา ดูโควตา แนบรูป และอนุมัติด้วยบัญชีคนอื่น
 9. ทดลองรีเฟรช URL ภายในเว็บ และออก/เข้าสู่ระบบใหม่
 
@@ -228,7 +228,7 @@ docker run -d --name scm-pma-aiven \
 3. เปิด `http://localhost:8089` กรอก user/password ของ Aiven ในหน้าล็อกอิน phpMyAdmin
 4. เลือกฐานข้อมูล เช่น `defaultdb` จะเห็นตารางใน [DATABASE_TH.md](DATABASE_TH.md)
 
-ไม่ต้อง Import SQL ซ้ำถ้า Render migration สำเร็จแล้ว หากต้อง Import เอง ใช้ `db/001_schema.sql` ซึ่งไม่สร้าง database ใหม่ แต่จะมีเพียง schema/roles/settings การสร้าง Super และวันหยุดเริ่มต้นทำโดย migration ของ API
+ไม่ต้อง Import SQL ซ้ำถ้า Render migration สำเร็จแล้ว หากต้อง Import เอง ใช้ `db/001_schema.sql` ตามด้วย `db/002_admin_role.sql` ซึ่งไม่สร้าง database ใหม่ แต่จะมีเพียง schema/roles/settings การสร้าง Admin และวันหยุดเริ่มต้นทำโดย migration ของ API
 
 หยุดตัว Aiven phpMyAdmin:
 
@@ -267,9 +267,9 @@ Local ใช้ `bash scripts/backup.sh` ส่วน production ใช้ backu
 | connect timeout | ตรวจ Host/Port, สถานะ service และ IP filter ของ Aiven |
 | self-signed / certificate verify | DB_SSL=true, วาง CA ครบ BEGIN/END รวม newline หรือใช้ Secret File ที่ถูกต้อง |
 | เปิดรูปเก่าไม่ได้หลัง deploy | คืน FILE_ENCRYPTION_KEY เดิม ไม่มีไฟล์ใน Render ที่ต้องตามหา |
-| ส่งวันลาไม่ผ่านปีปฏิทิน | Super ตรวจและยืนยัน holiday year ของช่วงวันลานั้น รวมปีข้างเคียงถ้าหยุดข้ามปี |
+| ส่งวันลาไม่ผ่านปีปฏิทิน | Admin / Super ตรวจและยืนยัน holiday year ของช่วงวันลานั้น รวมปีข้างเคียงถ้าหยุดข้ามปี |
 | เพิ่มวันหยุดไม่ได้เพราะมีคำขอ | จัดการคำขอปีนั้นตามข้อความระบบก่อน เพื่อไม่เปลี่ยนผลคำนวณย้อนหลัง |
-| สมาชิก login ไม่ได้หลังสมัคร | Super ต้องเปิดสถานะ active ก่อน |
+| สมาชิก login ไม่ได้หลังสมัคร | Admin / Super ต้องเปิดสถานะ active ก่อน |
 | Super อนุมัติไม่ได้ | ห้ามอนุมัติของตนเอง / มีกรณีพิเศษต้องติ๊กอนุมัติข้อยกเว้นและใส่หมายเหตุ |
 | สมัคร/ล็อกอินบ่อยแล้ว 429 | รอ rate limit ตามข้อความ ไม่ต้องแก้ password ใน DB |
 | เปลี่ยนค่าบน Pages แล้วเว็บยังชี้เก่า | VITE_* ต้อง Redeploy/build ใหม่ |

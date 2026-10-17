@@ -8,33 +8,33 @@ export async function migrate() {
   try {
     const [[lock]] = await c.query("SELECT GET_LOCK('scm_schema_migration',30) AS got");
     if (!lock.got) throw new Error('Migration lock unavailable');
-    const sql = await fs.readFile(new URL('../../db/001_schema.sql', import.meta.url), 'utf8');
-    for (const statement of sql
-      .split(';')
-      .map((s) => s.replace(/^--.*$/gm, '').trim())
-      .filter(Boolean))
-      await c.query(statement);
-    const [admins] = await c.query("SELECT id FROM users WHERE role='SUPER_CS'");
+    for (const file of ['001_schema.sql', '002_admin_role.sql']) {
+      const sql = await fs.readFile(new URL(`../../db/${file}`, import.meta.url), 'utf8');
+      for (const statement of sql
+        .split(';')
+        .map((s) => s.replace(/^--.*$/gm, '').trim())
+        .filter(Boolean))
+        await c.query(statement);
+      await c.execute('INSERT IGNORE INTO schema_migrations(version) VALUES(?)', [
+        file.slice(0, 3),
+      ]);
+    }
+    const [admins] = await c.query("SELECT id FROM users WHERE role IN ('ADMIN','SUPER_CS')");
     if (!admins.length) {
       const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
       if (password.length < 12)
         throw new Error('Set BOOTSTRAP_ADMIN_PASSWORD (12+ characters) before first migration');
-      const [u] = await c.execute(
+      await c.execute(
         'INSERT INTO users(name,email,password_hash,role,status,must_change_password) VALUES(?,?,?,?,?,?)',
         [
           process.env.BOOTSTRAP_ADMIN_NAME || 'SCM Administrator',
           (process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@scm.local').toLowerCase(),
           await hashPassword(password),
-          'SUPER_CS',
+          'ADMIN',
           'active',
           true,
         ],
       );
-      await c.execute('INSERT INTO work_schedules(user_id,valid_from,weekly_off) VALUES(?,?,?)', [
-        u.insertId,
-        `${Number(todayTH().slice(0, 4)) - 1}-01-01`,
-        '[0,6]',
-      ]);
     }
     const year = Number(todayTH().slice(0, 4));
     for (const y of [year - 1, year, year + 1]) await ensureYear(c, y);
@@ -57,9 +57,8 @@ export async function migrate() {
           );
       }
     }
-    await c.execute("INSERT IGNORE INTO schema_migrations(version) VALUES('001')");
     console.log(
-      'Schema 001 ready. Existing data preserved. Review holiday years before submitting leave.',
+      'Schema 002 ready. Admin role available; existing users and data preserved. Review holiday years before submitting leave.',
     );
   } finally {
     await c.query("SELECT RELEASE_LOCK('scm_schema_migration')").catch(() => {});

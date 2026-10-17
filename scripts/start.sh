@@ -52,7 +52,7 @@ echo ''
 echo "พร้อมใช้งาน: http://localhost:$web_port"
 echo "API health: http://localhost:$api_port/health"
 echo "phpMyAdmin: http://localhost:$pma_port"
-echo "บัญชี Super: $(read_value BOOTSTRAP_ADMIN_EMAIL)"
+echo "บัญชีผู้ดูแล (Admin สำหรับฐานใหม่): $(read_value BOOTSTRAP_ADMIN_EMAIL)"
 echo "รหัสเริ่มต้น: $(read_value BOOTSTRAP_ADMIN_PASSWORD)"
 echo 'รหัสนี้ใช้เฉพาะก่อนเปลี่ยนรหัสครั้งแรก ระบบไม่เปลี่ยนรหัสเดิมเมื่อรันซ้ำ'
 echo "phpMyAdmin user: $(read_value DB_USER)"

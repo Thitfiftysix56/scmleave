@@ -49,8 +49,9 @@ export default function ProfilePage({ user, onLogout, notify }) {
           </Typography>
           <Chip sx={{ mt: 2 }} label={ROLE_LABEL[user.role]} color="success" />
           <Typography variant="body2" mt={3}>
-            วันหยุดปกติ:{' '}
-            {off.length ? off.map((n) => DAY_LABEL[n]).join(', ') : 'ตรวจสอบกับผู้ดูแล'}
+            {user.role === 'ADMIN'
+              ? 'บัญชีผู้ดูแลระบบ ไม่ต้องกำหนดวันหยุดปกติหรือสิทธิ์วันลา'
+              : `วันหยุดปกติ: ${off.length ? off.map((n) => DAY_LABEL[n]).join(', ') : 'ตรวจสอบกับผู้ดูแล'}`}
           </Typography>
         </Card>
         <Card component="form" onSubmit={save} sx={{ p: 3 }}>

@@ -7,17 +7,20 @@ import { ensureYear } from './holidays.mjs';
 export const calendarRoutes = Router();
 calendarRoutes.get('/people', async (req, res) => {
   const [members] = await pool.query(
-    "SELECT id,name,role FROM users WHERE status='active' ORDER BY name",
+    "SELECT id,name,role FROM users WHERE status='active' AND role<>'ADMIN' ORDER BY name",
   );
   res.json({ members });
 });
 calendarRoutes.get('/meta', async (req, res) => {
   const [roles] = await pool.query('SELECT code,label FROM roles');
   const [years] = await pool.query('SELECT year,confirmed,source FROM holiday_years ORDER BY year');
-  const [schedules] = await pool.execute(
-    'SELECT valid_from,weekly_off FROM work_schedules WHERE user_id=? ORDER BY valid_from',
-    [req.user.id],
-  );
+  const [schedules] =
+    req.user.role === 'ADMIN'
+      ? [[]]
+      : await pool.execute(
+          'SELECT valid_from,weekly_off FROM work_schedules WHERE user_id=? ORDER BY valid_from',
+          [req.user.id],
+        );
   res.json({
     roles,
     policy: await policy(),
@@ -40,7 +43,7 @@ calendarRoutes.get('/calendar', async (req, res) => {
     for (let y = firstYear; y <= lastYear; y++) await ensureYear(c, y);
   });
   const [members] = await pool.query(
-    "SELECT id,name,role FROM users WHERE status='active' ORDER BY name",
+    "SELECT id,name,role FROM users WHERE status='active' AND role<>'ADMIN' ORDER BY name",
   );
   const [schedules] = await pool.execute(
     'SELECT user_id,valid_from,weekly_off FROM work_schedules WHERE valid_from<=? ORDER BY valid_from',
@@ -52,7 +55,7 @@ calendarRoutes.get('/calendar', async (req, res) => {
   );
   // No reason, review note, e-mail, certificate or medical details are included in team events.
   const [leaves] = await pool.execute(
-    `SELECT r.id,r.user_id,u.name,u.role,r.leave_type,r.status,r.start_date,r.end_date FROM leave_requests r JOIN users u ON u.id=r.user_id WHERE r.status IN ('pending','approved') AND r.start_date<? AND r.end_date>=?`,
+    `SELECT r.id,r.user_id,u.name,u.role,r.leave_type,r.status,r.start_date,r.end_date FROM leave_requests r JOIN users u ON u.id=r.user_id WHERE u.role<>'ADMIN' AND r.status IN ('pending','approved') AND r.start_date<? AND r.end_date>=?`,
     [q.end, q.start],
   );
   const events = [];
@@ -109,6 +112,7 @@ calendarRoutes.get('/calendar', async (req, res) => {
 });
 calendarRoutes.get('/balances', async (req, res) => {
   const year = yearInput.parse(req.query.year || todayTH().slice(0, 4));
+  if (req.user.role === 'ADMIN') return res.json({ year, balances: [] });
   const [quotas] = await pool.execute(
     'SELECT leave_type,quota FROM entitlements WHERE user_id=? AND year=?',
     [req.user.id, year],

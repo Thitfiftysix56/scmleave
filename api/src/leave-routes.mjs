@@ -3,7 +3,8 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { pool, transaction, audit, jsonValue } from './db.mjs';
-import { requireRole } from './auth.mjs';
+import { requireRole, requireStaff } from './auth.mjs';
+import { isManager, MANAGER_ROLES } from './roles.mjs';
 import { config } from './config.mjs';
 import { encryptImage, decryptImage } from './security.mjs';
 import { leaveInput, idInput, fail } from './validation.mjs';
@@ -54,7 +55,7 @@ function present(row) {
   };
 }
 leaveRoutes.get('/', async (req, res) => {
-  const admin = req.user.role === 'SUPER_CS';
+  const admin = isManager(req.user.role);
   const [rows] = await pool.execute(
     select +
       (admin ? '' : ' WHERE r.user_id=?') +
@@ -63,7 +64,7 @@ leaveRoutes.get('/', async (req, res) => {
   );
   res.json({ requests: rows.map(present) });
 });
-leaveRoutes.post('/preview', async (req, res) => {
+leaveRoutes.post('/preview', requireStaff, async (req, res) => {
   const v = z
     .object({ input: leaveInput, has_certificate: z.boolean().default(false) })
     .parse(req.body);
@@ -75,7 +76,7 @@ leaveRoutes.post('/preview', async (req, res) => {
   );
   res.json(result);
 });
-leaveRoutes.post('/', upload, async (req, res) => {
+leaveRoutes.post('/', requireStaff, upload, async (req, res) => {
   const v = parseMultipart(req),
     image = await normalizeImage(req.file);
   if (image && v.leave_type !== 'sick') fail(400, 'แนบใบรับรองแพทย์ได้เฉพาะลาป่วย');
@@ -126,8 +127,7 @@ leaveRoutes.get('/:id', async (req, res) => {
     [rows] = await pool.execute(select + ' WHERE r.id=?', [id]);
   const row = rows[0];
   if (!row) fail(404, 'ไม่พบคำขอ');
-  if (row.user_id !== req.user.id && req.user.role !== 'SUPER_CS')
-    fail(403, 'ไม่มีสิทธิ์ดูคำขอนี้');
+  if (row.user_id !== req.user.id && !isManager(req.user.role)) fail(403, 'ไม่มีสิทธิ์ดูคำขอนี้');
   const [days] = await pool.execute('SELECT day FROM leave_days WHERE request_id=? ORDER BY day', [
     id,
   ]);
@@ -138,7 +138,7 @@ leaveRoutes.post('/:id/cancel', async (req, res) => {
   await transaction(async (c) => {
     const [[r]] = await c.execute('SELECT * FROM leave_requests WHERE id=?', [id]);
     if (!r) fail(404, 'ไม่พบคำขอ');
-    if (r.user_id !== req.user.id && req.user.role !== 'SUPER_CS') fail(403, 'ไม่มีสิทธิ์ยกเลิก');
+    if (r.user_id !== req.user.id && !isManager(req.user.role)) fail(403, 'ไม่มีสิทธิ์ยกเลิก');
     if (!['pending', 'approved'].includes(r.status)) fail(409, 'คำขอไม่ได้อยู่ในสถานะที่ยกเลิกได้');
     const [coverage] = await c.execute(
       "SELECT c.id FROM coverage_requests c JOIN leave_days d ON d.day=c.day AND d.request_id=? WHERE c.covers_user_id=? AND c.status IN ('pending','approved') LIMIT 1",
@@ -151,7 +151,7 @@ leaveRoutes.post('/:id/cancel', async (req, res) => {
   });
   res.json({ message: 'ยกเลิกและคืนโควตาแล้ว' });
 });
-leaveRoutes.post('/:id/review', requireRole('SUPER_CS'), async (req, res) => {
+leaveRoutes.post('/:id/review', requireRole(...MANAGER_ROLES), async (req, res) => {
   const id = idInput.parse(req.params.id),
     v = z
       .object({
@@ -165,7 +165,7 @@ leaveRoutes.post('/:id/review', requireRole('SUPER_CS'), async (req, res) => {
     if (!r) fail(404, 'ไม่พบคำขอ');
     if (r.status !== 'pending') fail(409, 'คำขอนี้ได้รับการจัดการไปแล้ว');
     if (r.user_id === req.user.id)
-      fail(403, 'ไม่สามารถอนุมัติหรือปฏิเสธคำขอของตนเอง ให้ Super อีกคนตรวจสอบ');
+      fail(403, 'ไม่สามารถอนุมัติหรือปฏิเสธคำขอของตนเอง ให้ Admin หรือ Super คนอื่นตรวจสอบ');
     const [[owner]] = await c.execute('SELECT status FROM users WHERE id=?', [r.user_id]);
     if (owner.status !== 'active' && v.decision === 'approved')
       fail(409, 'เจ้าของคำขอไม่ได้อยู่ในสถานะใช้งาน');
@@ -209,8 +209,8 @@ leaveRoutes.get('/:id/certificate', async (req, res) => {
   );
   const row = rows[0];
   if (!row) fail(404, 'ไม่พบใบรับรองแพทย์');
-  if (row.user_id !== req.user.id && req.user.role !== 'SUPER_CS')
-    fail(403, 'ดูใบรับรองได้เฉพาะเจ้าของและ Super Customer Service');
+  if (row.user_id !== req.user.id && !isManager(req.user.role))
+    fail(403, 'ดูใบรับรองได้เฉพาะเจ้าของ Admin และ Super Customer Service');
   const buffer = decryptImage(row, config.fileKey);
   await audit(pool, req.user.id, 'certificate_viewed', 'leave', id);
   res

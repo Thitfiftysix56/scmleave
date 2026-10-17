@@ -1,6 +1,6 @@
 # ฐานข้อมูลและ API
 
-ไฟล์สร้างตารางทั้งหมด: `db/001_schema.sql` ใช้ MySQL 8.0+ / 8.4, InnoDB, utf8mb4 Foreign keys ป้องกันข้อมูลอ้างอิงที่หายไป และ queries ใช้ parameter binding
+ไฟล์สร้างตารางทั้งหมด: `db/001_schema.sql` และเพิ่ม role Admin ด้วย `db/002_admin_role.sql` ใช้ MySQL 8.0+ / 8.4, InnoDB, utf8mb4 Foreign keys ป้องกันข้อมูลอ้างอิงที่หายไป และ queries ใช้ parameter binding
 
 ## ตาราง
 
@@ -8,7 +8,7 @@
 |---|---|
 | schema_migrations | เวอร์ชัน schema ที่ผ่าน migration |
 | policy_lock | แถว id=1 สำหรับ serialize การจอง/อนุมัติ/เปลี่ยนกติกา |
-| roles | SUPER_CS / CS / STORE และชื่อแสดง |
+| roles | ADMIN / SUPER_CS / CS / STORE และชื่อแสดง |
 | users | id, name, email unique, password_hash (scrypt), role, status, must_change_password |
 | work_schedules | user_id, valid_from, weekly_off JSON เช่น `[5,6]`; unique ต่อคน+วันเริ่ม |
 | sessions | token_hash SHA-256, user_id, expires_at; ไม่เก็บ bearer token ตัวจริง |
@@ -19,20 +19,20 @@
 | leave_requests | ช่วงลา เหตุผล สถานะ การยืนยันทีม/พี่เกล้า ข้อยกเว้น ผลตรวจ ผู้พิจารณา |
 | leave_days | request_id+day, user_id; เฉพาะวันทำงานที่หักสิทธิ์จริง |
 | certificates | request_id, ciphertext MEDIUMBLOB, iv, auth_tag, mime, bytes; AES-256-GCM |
-| coverage_requests | ผู้ทำแทน/ผู้ถูกแทน วัน ชั่วโมง คำขอ OT Store ผู้อนุญาต Super ผู้พิจารณา |
+| coverage_requests | ผู้ทำแทน/ผู้ถูกแทน วัน ชั่วโมง คำขอ OT Store ผู้อนุญาต Admin / Super ผู้พิจารณา |
 | audit_logs | ผู้ดำเนินการ action entity details เวลาที่เกิดเหตุการณ์ |
 
 ทุกตารางสร้างแบบ IF NOT EXISTS การรัน migration ซ้ำไม่ truncate/drop ข้อมูล ตาราง roles/settings ใช้ INSERT IGNORE Bootstrap admin และตัวอย่างสร้างผ่าน Node เพื่อ hash รหัสก่อนบันทึก จึงไม่มีรหัส plaintext ใน SQL
 
-Migration ปัจจุบันเป็น schema เริ่มต้น 001 หากแก้โครงสร้างในอนาคต ให้เพิ่ม migration version ใหม่พร้อม ALTER TABLE ที่เหมาะสม ไม่คาดหวังว่า IF NOT EXISTS จะแก้ column ในตารางเดิมให้
+Migration ปัจจุบันมี 001 สำหรับ schema เริ่มต้น และ 002 สำหรับเพิ่ม role ADMIN โดยไม่เปลี่ยนข้อมูลเดิม หากแก้โครงสร้างในอนาคต ให้เพิ่ม migration version ใหม่พร้อม ALTER TABLE ที่เหมาะสม ไม่คาดหวังว่า IF NOT EXISTS จะแก้ column ในตารางเดิมให้
 
 ## ข้อมูลเริ่มต้น
 
 | ข้อมูล | ค่า |
 |---|---|
-| roles | SUPER_CS / CS / STORE |
-| users | Super 1 คนจาก BOOTSTRAP_ADMIN_* เมื่อยังไม่มี Super |
-| schedule ของ Super เริ่มต้น | อาทิตย์/เสาร์ ปรับในหน้าสมาชิกได้ |
+| roles | ADMIN / SUPER_CS / CS / STORE |
+| users | Admin 1 คนจาก BOOTSTRAP_ADMIN_* เมื่อยังไม่มี Admin หรือ Super ในฐาน |
+| schedule ของ Admin เริ่มต้น | ไม่มีตารางวันหยุด ไม่ใช้สิทธิ์วันลา |
 | holiday_years / holidays | ปีปัจจุบัน -1, ปีปัจจุบัน, ปีปัจจุบัน +1 ยังไม่ยืนยัน |
 | settings | weekendCapacity=1, maxConsecutive=4, exceptionConsecutive=5, certificateFromDays=3, blockHolidayExtension=true |
 | entitlements | ไม่มีแถวจนผู้ดูแลตั้งสิทธิ์ |
@@ -65,19 +65,20 @@ Session อยู่ใน sessionStorage ของแท็บ ไม่ใช�
 | GET | /people | ชื่อ/ตำแหน่งสมาชิก active ไม่ส่ง email/hash |
 | GET | /calendar?start=YYYY-MM-DD&end=YYYY-MM-DD | ปฏิทิน end เป็น exclusive เช่น FullCalendar สูงสุด 400 วัน |
 | GET | /balances?year=2027 | สิทธิ์/ยอดใช้/จองของตนเองในปี ค.ศ. |
-| GET | /leaves | คำขอของตนเอง; Super เห็นทุกคน สูงสุด 500 ล่าสุด |
+| GET | /leaves | คำขอของตนเอง; Admin / Super เห็นทุกคน สูงสุด 500 ล่าสุด |
 | POST | /leaves/preview | ตรวจเงื่อนไขก่อนส่ง ยังไม่จองโควตา |
 | POST | /leaves | multipart: payload JSON + certificate ถ้ามี บันทึกและจองโควตา |
-| GET | /leaves/:id | เหตุผล/วันลา/ผลตรวจ เฉพาะเจ้าของหรือ Super |
+| GET | /leaves/:id | เหตุผล/วันลา/ผลตรวจ เฉพาะเจ้าของ Admin หรือ Super |
 | POST | /leaves/:id/cancel | ยกเลิก pending/approved และคืนโควตา |
-| POST | /leaves/:id/review | Super ตรวจซ้ำแล้ว approve/reject ห้ามตนเอง |
-| GET | /leaves/:id/certificate | รูป JPEG ที่ถอดรหัส เฉพาะเจ้าของ/Super + audit |
-| GET/POST | /coverage | รายการ/ส่งคำขอทำงานแทน |
+| POST | /leaves/:id/review | Admin / Super ตรวจซ้ำแล้ว approve/reject ห้ามตนเอง |
+| GET | /leaves/:id/certificate | รูป JPEG ที่ถอดรหัส เฉพาะเจ้าของ/Admin/Super + audit |
+| GET/POST | /coverage | ดูรายการ; ส่งคำขอได้เฉพาะสมาชิกที่ไม่ใช่ Admin |
 | POST | /coverage/:id/store-authorize | Store อนุญาต OT ห้ามตนเอง |
-| POST | /coverage/:id/review | Super อนุมัติ/ปฏิเสธ |
-| POST | /coverage/:id/cancel | ยกเลิกโดยเจ้าของ/Super |
-| GET | /admin/members | Super ดูรายชื่อ/ตาราง/สิทธิ์ทั้งหมด |
-| PATCH | /admin/members/:id | Super แก้ name,role,status,weekly_off,valid_from |
+| POST | /coverage/:id/review | Admin / Super อนุมัติ/ปฏิเสธ |
+| POST | /coverage/:id/cancel | ยกเลิกโดยเจ้าของ/Admin/Super |
+| POST | /admin/admins | Admin / Super สร้างบัญชี Admin จาก name,email ไม่มีตารางวันหยุด คืนรหัสชั่วคราวครั้งเดียว |
+| GET | /admin/members | Admin / Super ดูรายชื่อ/ตาราง/สิทธิ์ทั้งหมด |
+| PATCH | /admin/members/:id | Admin / Super แก้ name,role,status,weekly_off,valid_from |
 | POST | /admin/members/:id/reset-password | สร้างรหัสสุ่มครั้งเดียว บังคับเปลี่ยน |
 | PUT | /admin/members/:id/entitlements/:year | บันทึก 3 ประเภท quota จำนวนเต็มหรือ null |
 | GET/PUT | /admin/settings | อ่าน/บันทึกกติกา |

@@ -13,6 +13,7 @@ import { adminRoutes } from './admin-routes.mjs';
 import { calendarRoutes } from './calendar-routes.mjs';
 import { coverageRoutes } from './coverage-routes.mjs';
 import { requestState } from './request-state.mjs';
+import { MANAGER_ROLES } from './roles.mjs';
 export const app = express();
 app.disable('x-powered-by');
 if (config.trustProxy) app.set('trust proxy', config.trustProxy);
@@ -61,7 +62,7 @@ app.use('/api', authenticate, (req, res, next) => {
 });
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/coverage', coverageRoutes);
-app.use('/api/admin', requireRole('SUPER_CS'), adminRoutes);
+app.use('/api/admin', requireRole(...MANAGER_ROLES), adminRoutes);
 app.use('/api', calendarRoutes);
 app.use((req, res) =>
   res.status(404).json({ message: 'ไม่พบ API ที่ร้องขอ', requestId: req.requestId }),
@@ -69,12 +70,10 @@ app.use((req, res) =>
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   if (err instanceof ZodError)
-    return res
-      .status(400)
-      .json({
-        message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
-        requestId: req.requestId,
-      });
+    return res.status(400).json({
+      message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      requestId: req.requestId,
+    });
   if (err.code === 'LIMIT_FILE_SIZE')
     return res.status(400).json({ message: 'รูปมีขนาดเกิน 8 MB' });
   if (err.name === 'MulterError')
@@ -93,11 +92,9 @@ app.use((err, req, res, next) => {
         error: err.message,
       }),
     );
-  res
-    .status(status)
-    .json({
-      message: status >= 500 ? 'ระบบขัดข้อง กรุณาลองใหม่หรือติดต่อผู้ดูแล' : err.message,
-      ...(err.details ? { details: err.details } : {}),
-      requestId: req.requestId,
-    });
+  res.status(status).json({
+    message: status >= 500 ? 'ระบบขัดข้อง กรุณาลองใหม่หรือติดต่อผู้ดูแล' : err.message,
+    ...(err.details ? { details: err.details } : {}),
+    requestId: req.requestId,
+  });
 });

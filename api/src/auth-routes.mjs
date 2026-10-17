@@ -39,7 +39,9 @@ authRoutes.post('/register', registerLimit, async (req, res) => {
     ]);
     await audit(c, u.insertId, 'registered', 'user', u.insertId, { requested_role: v.role });
   });
-  res.status(201).json({ message: 'สมัครสำเร็จ กรุณารอ Super Customer Service เปิดใช้งานบัญชี' });
+  res
+    .status(201)
+    .json({ message: 'สมัครสำเร็จ กรุณารอ Admin หรือ Super Customer Service เปิดใช้งานบัญชี' });
 });
 authRoutes.post('/login', loginLimit, async (req, res) => {
   const v = z

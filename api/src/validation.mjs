@@ -12,7 +12,7 @@ export const offDays = z
   .min(1)
   .max(6)
   .refine((a) => new Set(a).size === a.length, 'วันหยุดซ้ำกัน');
-export const role = z.enum(['SUPER_CS', 'CS', 'STORE']);
+export const role = z.enum(['ADMIN', 'SUPER_CS', 'CS', 'STORE']);
 export const leaveType = z.enum(['annual', 'personal', 'sick']);
 export const leaveInput = z
   .object({
@@ -42,13 +42,30 @@ export const registration = z
     weekly_off: offDays,
   })
   .strict();
-export const memberUpdate = z
+const memberFields = {
+  name: z.string().trim().min(2).max(120),
+  status: z.enum(['active', 'pending', 'inactive']),
+  valid_from: date.default(todayTH),
+};
+export const memberUpdate = z.discriminatedUnion('role', [
+  z
+    .object({
+      ...memberFields,
+      role: z.literal('ADMIN'),
+      weekly_off: z.array(z.number()).max(0).default([]),
+    })
+    .strict(),
+  z
+    .object({ ...memberFields, role: z.enum(['SUPER_CS', 'CS', 'STORE']), weekly_off: offDays })
+    .strict(),
+]);
+export const adminCreation = z
   .object({
     name: z.string().trim().min(2).max(120),
-    role,
-    status: z.enum(['active', 'pending', 'inactive']),
-    weekly_off: offDays,
-    valid_from: date.default(todayTH),
+    email: z
+      .email()
+      .max(191)
+      .transform((s) => s.toLowerCase()),
   })
   .strict();
 export const policyInput = z

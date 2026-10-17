@@ -6,6 +6,7 @@ import {
   idInput,
   yearInput,
   memberUpdate,
+  adminCreation,
   policyInput,
   date,
   leaveType,
@@ -14,6 +15,7 @@ import {
 import { hashPassword } from './security.mjs';
 import { todayTH } from './dates.mjs';
 import { ensureYear, onlineThaiHolidays, THAI_ICS_URL } from './holidays.mjs';
+import { isManager, isStaff } from './roles.mjs';
 export const adminRoutes = Router();
 async function freezeIfFutureLeave(c, from, to) {
   const [rows] = await c.execute(
@@ -48,6 +50,26 @@ adminRoutes.get('/members', async (req, res) => {
     })),
   });
 });
+adminRoutes.post('/admins', async (req, res) => {
+  const v = adminCreation.parse(req.body);
+  const temporaryPassword = randomBytes(15).toString('base64url');
+  const hash = await hashPassword(temporaryPassword);
+  const id = await transaction(async (c) => {
+    const [r] = await c.execute(
+      "INSERT INTO users(name,email,password_hash,role,status,must_change_password) VALUES(?,?,?,'ADMIN','active',TRUE)",
+      [v.name, v.email, hash],
+    );
+    await audit(c, req.user.id, 'admin_created', 'user', r.insertId);
+    return r.insertId;
+  });
+  res
+    .status(201)
+    .json({
+      id,
+      temporaryPassword,
+      message: 'เพิ่ม Admin แล้ว ส่งรหัสชั่วคราวให้เจ้าของบัญชีเป็นการส่วนตัว',
+    });
+});
 adminRoutes.patch('/members/:id', async (req, res) => {
   const id = idInput.parse(req.params.id),
     v = memberUpdate.parse(req.body);
@@ -67,42 +89,63 @@ adminRoutes.patch('/members/:id', async (req, res) => {
         fail(409, 'กรุณายกเลิกคำขอลา/ทำงานแทนในอนาคตของสมาชิกก่อนระงับบัญชี เพื่อคืนโควตาทีม');
     }
     if (
-      u.role === 'SUPER_CS' &&
+      isManager(u.role) &&
       u.status === 'active' &&
-      (v.role !== 'SUPER_CS' || v.status !== 'active')
+      (!isManager(v.role) || v.status !== 'active')
     ) {
       const [[count]] = await c.query(
-        "SELECT COUNT(*) AS n FROM users WHERE role='SUPER_CS' AND status='active'",
+        "SELECT COUNT(*) AS n FROM users WHERE role IN ('ADMIN','SUPER_CS') AND status='active'",
       );
-      if (count.n <= 1) fail(409, 'ต้องเหลือ Super Customer Service ที่ใช้งานได้อย่างน้อย 1 คน');
+      if (count.n <= 1)
+        fail(409, 'ต้องเหลือ Admin หรือ Super Customer Service ที่ใช้งานได้อย่างน้อย 1 คน');
     }
-    const [scheduleRows] = await c.execute(
-      'SELECT valid_from,weekly_off FROM work_schedules WHERE user_id=? AND valid_from<=? ORDER BY valid_from DESC LIMIT 1',
-      [id, v.valid_from],
-    );
-    const oldOff = scheduleRows[0] ? jsonValue(scheduleRows[0].weekly_off) : [];
-    const changed = JSON.stringify([...oldOff].sort()) !== JSON.stringify([...v.weekly_off].sort());
-    if (changed) {
-      if (v.valid_from < todayTH())
-        fail(400, 'การเปลี่ยนวันหยุดต้องมีผลวันนี้หรือในอนาคต เพื่อเก็บประวัติเดิม');
-      const [future] = await c.execute(
-        "SELECT id FROM leave_requests WHERE user_id=? AND status IN ('pending','approved') AND end_date>=? LIMIT 1",
-        [id, v.valid_from],
+    if (v.role === 'ADMIN' && u.role !== 'ADMIN') {
+      const [leaves] = await c.execute(
+        "SELECT id FROM leave_requests WHERE user_id=? AND (status='pending' OR (status='approved' AND end_date>=?)) LIMIT 1",
+        [id, todayTH()],
       );
-      if (future.length)
+      const [covers] = await c.execute(
+        "SELECT id FROM coverage_requests WHERE (user_id=? OR covers_user_id=?) AND (status='pending' OR (status='approved' AND day>=?)) LIMIT 1",
+        [id, id, todayTH()],
+      );
+      if (leaves.length || covers.length)
         fail(
           409,
-          'สมาชิกมีคำขอลาหลังวันที่เปลี่ยนตาราง ให้ยกเลิก/ส่งใหม่ก่อน เพื่อคำนวณวันลาถูกต้อง',
+          'ก่อนเปลี่ยนเป็น Admin ให้ยกเลิกคำขอรออนุมัติและวันลา/ทำงานแทนในอนาคตที่ยังใช้งานอยู่ ประวัติเดิมยังคงอยู่',
         );
-      const [covers] = await c.execute(
-        "SELECT id FROM coverage_requests WHERE (user_id=? OR covers_user_id=?) AND status IN ('pending','approved') AND day>=? LIMIT 1",
-        [id, id, v.valid_from],
+    }
+    let changed = false;
+    if (isStaff(v.role)) {
+      const [scheduleRows] = await c.execute(
+        'SELECT valid_from,weekly_off FROM work_schedules WHERE user_id=? AND valid_from<=? ORDER BY valid_from DESC LIMIT 1',
+        [id, v.valid_from],
       );
-      if (covers.length) fail(409, 'มีรายการทำงานแทนหลังวันเปลี่ยนตาราง ให้ยกเลิกก่อน');
-      await c.execute(
-        'INSERT INTO work_schedules(user_id,valid_from,weekly_off) VALUES(?,?,?) ON DUPLICATE KEY UPDATE weekly_off=VALUES(weekly_off)',
-        [id, v.valid_from, JSON.stringify(v.weekly_off)],
-      );
+      const oldOff = scheduleRows[0] ? jsonValue(scheduleRows[0].weekly_off) : [];
+      changed =
+        u.role === 'ADMIN' ||
+        JSON.stringify([...oldOff].sort()) !== JSON.stringify([...v.weekly_off].sort());
+      if (changed) {
+        if (v.valid_from < todayTH())
+          fail(400, 'การเปลี่ยนวันหยุดต้องมีผลวันนี้หรือในอนาคต เพื่อเก็บประวัติเดิม');
+        const [future] = await c.execute(
+          "SELECT id FROM leave_requests WHERE user_id=? AND status IN ('pending','approved') AND end_date>=? LIMIT 1",
+          [id, v.valid_from],
+        );
+        if (future.length)
+          fail(
+            409,
+            'สมาชิกมีคำขอลาหลังวันที่เปลี่ยนตาราง ให้ยกเลิก/ส่งใหม่ก่อน เพื่อคำนวณวันลาถูกต้อง',
+          );
+        const [covers] = await c.execute(
+          "SELECT id FROM coverage_requests WHERE (user_id=? OR covers_user_id=?) AND status IN ('pending','approved') AND day>=? LIMIT 1",
+          [id, id, v.valid_from],
+        );
+        if (covers.length) fail(409, 'มีรายการทำงานแทนหลังวันเปลี่ยนตาราง ให้ยกเลิกก่อน');
+        await c.execute(
+          'INSERT INTO work_schedules(user_id,valid_from,weekly_off) VALUES(?,?,?) ON DUPLICATE KEY UPDATE weekly_off=VALUES(weekly_off)',
+          [id, v.valid_from, JSON.stringify(v.weekly_off)],
+        );
+      }
     }
     await c.execute('UPDATE users SET name=?,role=?,status=? WHERE id=?', [
       v.name,
@@ -113,6 +156,7 @@ adminRoutes.patch('/members/:id', async (req, res) => {
     if (v.role !== u.role || v.status !== u.status)
       await c.execute('DELETE FROM sessions WHERE user_id=?', [id]);
     await audit(c, req.user.id, 'member_updated', 'user', id, {
+      previousRole: u.role,
       role: v.role,
       status: v.status,
       scheduleChanged: changed,
@@ -151,8 +195,9 @@ adminRoutes.put('/members/:id/entitlements/:year', async (req, res) => {
       .refine((a) => new Set(a.map((r) => r.leave_type)).size === 3)
       .parse(req.body);
   await transaction(async (c) => {
-    const [[u]] = await c.execute('SELECT id FROM users WHERE id=?', [id]);
+    const [[u]] = await c.execute('SELECT id,role FROM users WHERE id=?', [id]);
     if (!u) fail(404, 'ไม่พบสมาชิก');
+    if (u.role === 'ADMIN') fail(400, 'Admin ไม่ใช้สิทธิ์วันลา ไม่ต้องกำหนดสิทธิ์รายปี');
     for (const item of v) {
       const [[used]] = await c.execute(
         "SELECT COUNT(*) AS n FROM leave_days d JOIN leave_requests r ON r.id=d.request_id WHERE r.user_id=? AND r.leave_type=? AND YEAR(d.day)=? AND r.status IN ('pending','approved')",

@@ -30,9 +30,11 @@ import {
   ConfirmDialog,
 } from './ui';
 const currentSchedule = (m) =>
-  (m.schedules.filter((s) => s.valid_from <= today()).at(-1) || m.schedules[0])?.weekly_off || [
-    0, 6,
-  ];
+  m.role === 'ADMIN'
+    ? []
+    : (m.schedules.filter((s) => s.valid_from <= today()).at(-1) || m.schedules[0])?.weekly_off || [
+        0, 6,
+      ];
 export default function MembersPage({ version, onSaved, notify }) {
   const [members, setMembers] = useState(null),
     [error, setError] = useState(''),
@@ -43,6 +45,8 @@ export default function MembersPage({ version, onSaved, notify }) {
     [dialogError, setDialogError] = useState(''),
     [confirm, setConfirm] = useState(null),
     [temporary, setTemporary] = useState(null),
+    [addingAdmin, setAddingAdmin] = useState(false),
+    [adminForm, setAdminForm] = useState({ name: '', email: '' }),
     [year, setYear] = useState(Number(today().slice(0, 4))),
     [quotas, setQuotas] = useState({ annual: '', personal: '', sick: '' });
   useEffect(() => {
@@ -119,6 +123,22 @@ export default function MembersPage({ version, onSaved, notify }) {
       setBusy(false);
     }
   }
+  async function createAdmin(e) {
+    e.preventDefault();
+    setBusy(true);
+    setDialogError('');
+    try {
+      const r = await api('/admin/admins', { method: 'POST', body: adminForm });
+      setTemporary({ name: adminForm.name, email: adminForm.email, password: r.temporaryPassword });
+      setAddingAdmin(false);
+      onSaved();
+      notify(r.message);
+    } catch (e) {
+      setDialogError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   function reset(m) {
     setConfirm({
       title: 'รีเซ็ตรหัสผ่านสมาชิก',
@@ -134,7 +154,19 @@ export default function MembersPage({ version, onSaved, notify }) {
     <>
       <PageHeading
         title="สมาชิกในทีม"
-        subtitle="เปิดใช้งานบัญชี จัดตำแหน่ง และกำหนดวันหยุดประจำตัว"
+        subtitle="เปิดใช้งานบัญชี จัดตำแหน่ง และกำหนดวันหยุดเฉพาะสมาชิกที่ต้องลา"
+        action={
+          <Button
+            variant="contained"
+            onClick={() => {
+              setAddingAdmin(true);
+              setAdminForm({ name: '', email: '' });
+              setDialogError('');
+            }}
+          >
+            เพิ่ม Admin
+          </Button>
+        }
       />
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -184,9 +216,11 @@ export default function MembersPage({ version, onSaved, notify }) {
                 label: 'หยุดปกติ',
                 render: (m) => (
                   <Typography variant="body2">
-                    {currentSchedule(m)
-                      .map((n) => DAY_LABEL[n])
-                      .join(', ')}
+                    {m.role === 'ADMIN'
+                      ? 'ไม่ต้องกำหนด'
+                      : currentSchedule(m)
+                          .map((n) => DAY_LABEL[n])
+                          .join(', ')}
                   </Typography>
                 ),
               },
@@ -232,7 +266,14 @@ export default function MembersPage({ version, onSaved, notify }) {
                 <SelectField
                   label="ตำแหน่ง"
                   value={form.role}
-                  onChange={(v) => setForm({ ...form, role: v })}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      role: v,
+                      weekly_off:
+                        v === 'ADMIN' ? [] : form.weekly_off.length ? form.weekly_off : [0, 6],
+                    })
+                  }
                   options={ROLE_LABEL}
                 />
                 <SelectField
@@ -242,63 +283,76 @@ export default function MembersPage({ version, onSaved, notify }) {
                   options={{ pending: 'รอเปิดใช้งาน', active: 'ใช้งาน', inactive: 'ระงับ' }}
                 />
               </Stack>
-              <OffPicker
-                value={form.weekly_off}
-                onChange={(v) => setForm({ ...form, weekly_off: v })}
-              />
-              <TextField
-                label="วันเริ่มใช้ตารางนี้"
-                type="date"
-                InputLabelProps={{ shrink: true }}
-                value={form.valid_from}
-                onChange={(e) => setForm({ ...form, valid_from: e.target.value })}
-                helperText="เก็บตารางเดิมไว้คำนวณประวัติ หากมีคำขออนาคตต้องยกเลิก/ส่งใหม่ก่อนเปลี่ยน"
-              />
+              {form.role === 'ADMIN' ? (
+                <Alert severity="info">
+                  Admin ไม่ต้องกำหนดวันหยุดและสิทธิ์รายปี ไม่แสดงวันหยุดส่วนตัวในปฏิทิน
+                  และไม่ส่งคำขอลาหรือทำงานแทน
+                </Alert>
+              ) : (
+                <>
+                  <OffPicker
+                    value={form.weekly_off}
+                    onChange={(v) => setForm({ ...form, weekly_off: v })}
+                  />
+                  <TextField
+                    label="วันเริ่มใช้ตารางนี้"
+                    type="date"
+                    InputLabelProps={{ shrink: true }}
+                    value={form.valid_from}
+                    onChange={(e) => setForm({ ...form, valid_from: e.target.value })}
+                    helperText="เก็บตารางเดิมไว้คำนวณประวัติ หากมีคำขออนาคตต้องยกเลิก/ส่งใหม่ก่อนเปลี่ยน"
+                  />
+                </>
+              )}
               <Button variant="contained" disabled={busy} onClick={save}>
                 บันทึกข้อมูลสมาชิก
               </Button>
-              <Divider />
-              <Typography variant="h6">สิทธิ์วันลารายปี</Typography>
-              <TextField
-                label="ปี ค.ศ."
-                type="number"
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
-                helperText={`พ.ศ. ${Number(year) + 543}`}
-                inputProps={{ min: 2020, max: 2100 }}
-              />
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                {Object.entries(LEAVE_LABEL).map(([t, l]) => (
+              {form.role !== 'ADMIN' && (
+                <>
+                  <Divider />
+                  <Typography variant="h6">สิทธิ์วันลารายปี</Typography>
                   <TextField
-                    key={t}
-                    fullWidth
-                    label={l + ' (วัน)'}
+                    label="ปี ค.ศ."
                     type="number"
-                    value={quotas[t]}
-                    onChange={(e) => setQuotas({ ...quotas, [t]: e.target.value })}
-                    inputProps={{ min: 0, max: 366 }}
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                    helperText={`พ.ศ. ${Number(year) + 543}`}
+                    inputProps={{ min: 2020, max: 2100 }}
                   />
-                ))}
-              </Stack>
-              <Typography variant="caption" color="text.secondary">
-                ช่องว่าง = ยังไม่กำหนดเพดานรายปี · 0 = ไม่มีสิทธิ์ · ไม่มีวันลาชดเชยอัตโนมัติ
-              </Typography>
-              <Button
-                variant="outlined"
-                disabled={busy || Number(year) < 2020 || Number(year) > 2100}
-                onClick={saveQuotas}
-              >
-                บันทึกสิทธิ์วันลาแยกต่างหาก
-              </Button>
-              <Typography variant="body2" color="text.secondary">
-                ประวัติตาราง:{' '}
-                {selected?.schedules
-                  .map(
-                    (s) =>
-                      `${displayDate(s.valid_from)}: ${s.weekly_off.map((d) => DAY_LABEL[d]).join(', ')}`,
-                  )
-                  .join(' / ')}
-              </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    {Object.entries(LEAVE_LABEL).map(([t, l]) => (
+                      <TextField
+                        key={t}
+                        fullWidth
+                        label={l + ' (วัน)'}
+                        type="number"
+                        value={quotas[t]}
+                        onChange={(e) => setQuotas({ ...quotas, [t]: e.target.value })}
+                        inputProps={{ min: 0, max: 366 }}
+                      />
+                    ))}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    ช่องว่าง = ยังไม่กำหนดเพดานรายปี · 0 = ไม่มีสิทธิ์ · ไม่มีวันลาชดเชยอัตโนมัติ
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    disabled={busy || Number(year) < 2020 || Number(year) > 2100}
+                    onClick={saveQuotas}
+                  >
+                    บันทึกสิทธิ์วันลาแยกต่างหาก
+                  </Button>
+                  <Typography variant="body2" color="text.secondary">
+                    ประวัติตาราง:{' '}
+                    {selected?.schedules
+                      .map(
+                        (s) =>
+                          `${displayDate(s.valid_from)}: ${s.weekly_off.map((d) => DAY_LABEL[d]).join(', ')}`,
+                      )
+                      .join(' / ')}
+                  </Typography>
+                </>
+              )}
             </Stack>
           )}
         </DialogContent>
@@ -308,6 +362,48 @@ export default function MembersPage({ version, onSaved, notify }) {
           </Button>
         </DialogActions>
       </Dialog>
+      <Dialog
+        open={addingAdmin}
+        onClose={busy ? undefined : () => setAddingAdmin(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <Box component="form" onSubmit={createAdmin}>
+          <DialogTitle>เพิ่ม Admin</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2.5} mt={1}>
+              {dialogError && <Alert severity="error">{dialogError}</Alert>}
+              <Alert severity="info">
+                บัญชีผู้ดูแลระบบ ไม่ต้องเลือกวันหยุด
+                ระบบสร้างรหัสชั่วคราวและบังคับเปลี่ยนรหัสเมื่อเข้าสู่ระบบ
+              </Alert>
+              <TextField
+                label="ชื่อที่แสดง"
+                required
+                value={adminForm.name}
+                inputProps={{ minLength: 2, maxLength: 120 }}
+                onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })}
+              />
+              <TextField
+                label="อีเมล"
+                type="email"
+                required
+                value={adminForm.email}
+                inputProps={{ maxLength: 191 }}
+                onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value.trim() })}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={busy} onClick={() => setAddingAdmin(false)}>
+              ปิด
+            </Button>
+            <Button variant="contained" type="submit" disabled={busy}>
+              สร้างบัญชี Admin
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
       <ConfirmDialog state={confirm} onClose={() => setConfirm(null)} />
       <Dialog open={Boolean(temporary)} onClose={() => setTemporary(null)} fullWidth maxWidth="xs">
         <DialogTitle>รหัสชั่วคราว · {temporary?.name}</DialogTitle>
@@ -315,6 +411,11 @@ export default function MembersPage({ version, onSaved, notify }) {
           <Alert severity="warning" sx={{ mb: 2 }}>
             แสดงครั้งเดียว กรุณาจดและส่งให้เจ้าของบัญชีเป็นการส่วนตัว
           </Alert>
+          {temporary?.email && (
+            <Typography variant="body2" mb={2}>
+              อีเมลเข้าสู่ระบบ: {temporary.email}
+            </Typography>
+          )}
           <TextField fullWidth value={temporary?.password || ''} inputProps={{ readOnly: true }} />
           <Typography variant="caption" color="text.secondary">
             ระบบบังคับเปลี่ยนรหัสเมื่อเข้าสู่ระบบ

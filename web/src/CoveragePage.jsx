@@ -17,7 +17,7 @@ import {
   Chip,
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
-import { api, today, displayDate } from './api';
+import { api, today, displayDate, isManager, isStaff } from './api';
 import { PageHeading, DataTable, Status, Loading, ConfirmDialog } from './ui';
 export default function CoveragePage({ user, version, onSaved, notify }) {
   const [rows, setRows] = useState(null),
@@ -104,20 +104,22 @@ export default function CoveragePage({ user, version, onSaved, notify }) {
         title="ทำงานแทน / OT"
         subtitle="บันทึกการมาทำแทน โดยไม่สร้าง OT หรือวันลาชดเชยอัตโนมัติ"
         action={
-          <Button
-            variant="contained"
-            startIcon={<AddRoundedIcon />}
-            onClick={() => {
-              setOpen(true);
-              setError('');
-            }}
-          >
-            ขอมาทำงานแทน
-          </Button>
+          isStaff(user.role) && (
+            <Button
+              variant="contained"
+              startIcon={<AddRoundedIcon />}
+              onClick={() => {
+                setOpen(true);
+                setError('');
+              }}
+            >
+              ขอมาทำงานแทน
+            </Button>
+          )
         }
       />
       <Alert severity="info" sx={{ mb: 3 }}>
-        กรณีขอ OT ต้องได้รับอนุญาตจาก Store แล้วให้ Super อนุมัติรายการอีกครั้ง
+        กรณีขอ OT ต้องได้รับอนุญาตจาก Store แล้วให้ Admin หรือ Super อนุมัติรายการอีกครั้ง
         ระบบบันทึกชั่วโมงที่ได้รับอนุญาต ไม่มีการคำนวณเงินเดือนหรือสร้างวันลาชดเชย
       </Alert>
       {error && !open && !selected && (
@@ -177,21 +179,19 @@ export default function CoveragePage({ user, version, onSaved, notify }) {
                           อนุญาต OT
                         </Button>
                       )}
-                    {user.role === 'SUPER_CS' &&
-                      r.status === 'pending' &&
-                      r.user_id !== user.id && (
-                        <Button
-                          size="small"
-                          onClick={() => {
-                            setSelected(r);
-                            setNote('');
-                            setError('');
-                          }}
-                        >
-                          พิจารณา
-                        </Button>
-                      )}
-                    {(user.id === r.user_id || user.role === 'SUPER_CS') &&
+                    {isManager(user.role) && r.status === 'pending' && r.user_id !== user.id && (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSelected(r);
+                          setNote('');
+                          setError('');
+                        }}
+                      >
+                        พิจารณา
+                      </Button>
+                    )}
+                    {(user.id === r.user_id || isManager(user.role)) &&
                       ['pending', 'approved'].includes(r.status) && (
                         <Button size="small" color="error" onClick={() => action(r, 'cancel')}>
                           ยกเลิก

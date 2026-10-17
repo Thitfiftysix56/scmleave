@@ -3,16 +3,17 @@ import { z } from 'zod';
 import { pool, transaction, audit, jsonValue } from './db.mjs';
 import { date, idInput, fail } from './validation.mjs';
 import { isOff, todayTH } from './dates.mjs';
-import { requireRole } from './auth.mjs';
+import { requireRole, requireStaff } from './auth.mjs';
+import { isManager, MANAGER_ROLES } from './roles.mjs';
 export const coverageRoutes = Router();
 async function validateCoverage(c, v, userId, excludeId = 0) {
   if (v.day < todayTH()) fail(400, 'ขอมาทำงานแทนล่วงหน้าหรือวันนี้เท่านั้น');
-  const [users] = await c.execute("SELECT id FROM users WHERE id IN (?,?) AND status='active'", [
-    userId,
-    v.covers_user_id,
-  ]);
+  const [users] = await c.execute(
+    "SELECT id FROM users WHERE id IN (?,?) AND status='active' AND role<>'ADMIN'",
+    [userId, v.covers_user_id],
+  );
   if (userId === v.covers_user_id || users.length !== 2)
-    fail(400, 'เลือกเพื่อนร่วมงานที่ใช้งานอยู่และไม่ใช่ตนเอง');
+    fail(400, 'เลือกสมาชิกที่ไม่ใช่ Admin ซึ่งใช้งานอยู่และไม่ใช่ตนเอง');
   const [absent] = await c.execute(
     "SELECT r.id FROM leave_days d JOIN leave_requests r ON r.id=d.request_id WHERE d.user_id=? AND d.day=? AND r.status IN ('pending','approved')",
     [userId, v.day],
@@ -45,14 +46,14 @@ async function validateCoverage(c, v, userId, excludeId = 0) {
     fail(400, 'วันที่เลือกไม่ใช่วันหยุดหรือวันลาที่อนุมัติแล้วของคนที่มาทำแทน');
 }
 coverageRoutes.get('/', async (req, res) => {
-  const full = ['SUPER_CS', 'STORE'].includes(req.user.role);
+  const full = isManager(req.user.role) || req.user.role === 'STORE';
   const [rows] = await pool.execute(
     `SELECT c.*,u.name,covered.name AS covers_name,store.name AS store_name FROM coverage_requests c JOIN users u ON u.id=c.user_id JOIN users covered ON covered.id=c.covers_user_id LEFT JOIN users store ON store.id=c.store_authorized_by ${full ? '' : 'WHERE c.user_id=?'} ORDER BY c.id DESC LIMIT 300`,
     full ? [] : [req.user.id],
   );
   res.json({ requests: rows });
 });
-coverageRoutes.post('/', async (req, res) => {
+coverageRoutes.post('/', requireStaff, async (req, res) => {
   const v = z
     .object({
       covers_user_id: idInput,
@@ -88,9 +89,9 @@ coverageRoutes.post('/:id/store-authorize', requireRole('STORE'), async (req, re
     ]);
     await audit(c, req.user.id, 'ot_store_authorized', 'coverage', id);
   });
-  res.json({ message: 'Store อนุญาต OT แล้ว รอ Super อนุมัติรายการ' });
+  res.json({ message: 'Store อนุญาต OT แล้ว รอ Admin / Super อนุมัติรายการ' });
 });
-coverageRoutes.post('/:id/review', requireRole('SUPER_CS'), async (req, res) => {
+coverageRoutes.post('/:id/review', requireRole(...MANAGER_ROLES), async (req, res) => {
   const id = idInput.parse(req.params.id),
     v = z
       .object({
@@ -126,7 +127,7 @@ coverageRoutes.post('/:id/cancel', async (req, res) => {
   await transaction(async (c) => {
     const [[r]] = await c.execute('SELECT * FROM coverage_requests WHERE id=?', [id]);
     if (!r) fail(404, 'ไม่พบรายการ');
-    if (r.user_id !== req.user.id && req.user.role !== 'SUPER_CS') fail(403, 'ไม่มีสิทธิ์ยกเลิก');
+    if (r.user_id !== req.user.id && !isManager(req.user.role)) fail(403, 'ไม่มีสิทธิ์ยกเลิก');
     if (!['pending', 'approved'].includes(r.status)) fail(409, 'ยกเลิกไปแล้ว');
     await c.execute("UPDATE coverage_requests SET status='cancelled' WHERE id=?", [id]);
     await audit(c, req.user.id, 'coverage_cancelled', 'coverage', id);

@@ -59,7 +59,7 @@ export function evaluateLeave(input, ctx) {
   const restrictive = (code, message) => {
     if (isSick) {
       requiresException = true;
-      warning(code, message + ' — ต้องให้ Super อนุมัติข้อยกเว้น');
+      warning(code, message + ' — ต้องให้ Admin / Super อนุมัติข้อยกเว้น');
     } else error(code, message);
   };
   if (unconfirmed.length)
@@ -81,14 +81,14 @@ export function evaluateLeave(input, ctx) {
     requiresException = true;
     if (!input.team_discussed || !input.notified_klao)
       restrictive('FIVE_DAY_ACK', 'หยุดต่อเนื่อง 5 วันต้องคุยในทีมและแจ้งพี่เกล้าก่อน');
-    warning('FIVE_DAY', 'คำขอนี้ต้องให้ Super ยืนยันการอนุมัติพิเศษ');
+    warning('FIVE_DAY', 'คำขอนี้ต้องให้ Admin / Super ยืนยันการอนุมัติพิเศษ');
   }
   for (const d of days) {
     if ([5, 6, 0].includes(weekday(d)) && (ctx.busy?.[d] || 0) >= p.weekendCapacity) {
       const message = `${d}: โควตาศุกร์/เสาร์/อาทิตย์เต็มแล้ว (รวม Store และคำขอรออนุมัติ)`;
       if (!isSick && input.exception_requested && input.team_discussed) {
         requiresException = true;
-        warning('CAPACITY', message + ' — ขอให้ Super พิจารณาเหตุจำเป็นหลังคุยทีม');
+        warning('CAPACITY', message + ' — ขอให้ Admin / Super พิจารณาเหตุจำเป็นหลังคุยทีม');
       } else restrictive('CAPACITY', message + ' หากจำเป็นให้คุยทีมและขออนุมัติพิเศษ');
     }
     if ((ctx.coverageDays || []).includes(d))

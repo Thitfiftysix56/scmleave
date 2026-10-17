@@ -28,7 +28,7 @@ import BeachAccessRoundedIcon from '@mui/icons-material/BeachAccessRounded';
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
-import { api, hasToken, setToken, ROLE_LABEL, today } from './api';
+import { api, hasToken, setToken, ROLE_LABEL, today, isManager, isStaff } from './api';
 import { Auth } from './auth';
 import { Loading } from './ui';
 import CalendarPage from './CalendarPage';
@@ -100,12 +100,13 @@ export default function App() {
     await revoke;
   }
   function create(value) {
+    if (!isStaff(user?.role)) return;
     setDates(value);
     setCreating(true);
   }
   function details(id, owner) {
-    if (owner !== user.id && user.role !== 'SUPER_CS') {
-      notify('รายละเอียดคำขอดูได้เฉพาะเจ้าของและ Super Customer Service');
+    if (owner !== user.id && !isManager(user.role)) {
+      notify('รายละเอียดคำขอดูได้เฉพาะเจ้าของ Admin และ Super Customer Service');
       return;
     }
     setDetail(id);
@@ -154,13 +155,9 @@ export default function App() {
     );
   const menus = [
     ['/', 'ปฏิทินของทีม', CalendarMonthRoundedIcon],
-    [
-      '/requests',
-      user.role === 'SUPER_CS' ? 'คำขอ / อนุมัติ' : 'คำขอลาของฉัน',
-      EventNoteRoundedIcon,
-    ],
+    ['/requests', isManager(user.role) ? 'คำขอ / อนุมัติ' : 'คำขอลาของฉัน', EventNoteRoundedIcon],
     ['/coverage', 'ทำงานแทน / OT', WorkHistoryRoundedIcon],
-    ...(user.role === 'SUPER_CS'
+    ...(isManager(user.role)
       ? [
           ['/members', 'สมาชิกในทีม', PeopleAltRoundedIcon],
           ['/holidays', 'วันหยุดไทย', BeachAccessRoundedIcon],
@@ -237,10 +234,12 @@ export default function App() {
       <Box sx={{ mt: 'auto', pt: 4 }}>
         <Box sx={{ p: 2, bgcolor: '#e8f8f1', borderRadius: 2.5, mb: 2 }}>
           <Typography variant="body2" fontWeight={750}>
-            วางแผนก่อนหยุด
+            {user.role === 'ADMIN' ? 'บัญชีผู้ดูแลระบบ' : 'วางแผนก่อนหยุด'}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            ศุกร์–อาทิตย์ลาเพิ่มได้ 1 คน รวม Store
+            {user.role === 'ADMIN'
+              ? 'ไม่ต้องกำหนดวันหยุดหรือส่งคำขอลาส่วนตัว'
+              : 'ศุกร์–อาทิตย์ลาเพิ่มได้ 1 คน รวม Store'}
           </Typography>
         </Box>
         <Button
@@ -342,6 +341,7 @@ export default function App() {
                 element={
                   <CalendarPage
                     version={version}
+                    canRequestLeave={isStaff(user.role)}
                     onCreate={create}
                     onDetails={details}
                     notify={notify}
@@ -365,7 +365,7 @@ export default function App() {
                   <CoveragePage user={user} version={version} onSaved={refresh} notify={notify} />
                 }
               />
-              {user.role === 'SUPER_CS' && (
+              {isManager(user.role) && (
                 <>
                   <Route
                     path="/members"
@@ -390,13 +390,15 @@ export default function App() {
           )}
         </Box>
       </Box>
-      <LeaveForm
-        open={creating}
-        dates={dates}
-        onClose={() => setCreating(false)}
-        onSaved={refresh}
-        notify={notify}
-      />
+      {isStaff(user.role) && (
+        <LeaveForm
+          open={creating}
+          dates={dates}
+          onClose={() => setCreating(false)}
+          onSaved={refresh}
+          notify={notify}
+        />
+      )}
       <LeaveDetails
         id={detail}
         onClose={() => setDetail(null)}

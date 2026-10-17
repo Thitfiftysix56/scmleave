@@ -11,7 +11,7 @@ import {
   Alert,
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
-import { api, LEAVE_LABEL, STATUS_LABEL, displayDate, today } from './api';
+import { api, LEAVE_LABEL, STATUS_LABEL, displayDate, today, isManager, isStaff } from './api';
 import { PageHeading, DataTable, Status, Loading } from './ui';
 export default function RequestsPage({ user, version, onCreate, onDetails }) {
   const [rows, setRows] = useState(null),
@@ -39,12 +39,18 @@ export default function RequestsPage({ user, version, onCreate, onDetails }) {
   return (
     <>
       <PageHeading
-        title={user.role === 'SUPER_CS' ? 'คำขอและการอนุมัติ' : 'คำขอลาของฉัน'}
-        subtitle="ติดตามสถานะ ตรวจรายละเอียด และดูยอดวันลาที่ใช้ไป"
+        title={isManager(user.role) ? 'คำขอและการอนุมัติ' : 'คำขอลาของฉัน'}
+        subtitle={
+          user.role === 'ADMIN'
+            ? 'พิจารณาคำขอของทีม โดยไม่มีสิทธิ์วันลาส่วนตัว'
+            : 'ติดตามสถานะ ตรวจรายละเอียด และดูยอดวันลาที่ใช้ไป'
+        }
         action={
-          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => onCreate()}>
-            สร้างคำขอลา
-          </Button>
+          isStaff(user.role) && (
+            <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => onCreate()}>
+              สร้างคำขอลา
+            </Button>
+          )
         }
       />
       <Box

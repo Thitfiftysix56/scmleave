@@ -23,7 +23,7 @@ export async function leaveContext(c, userId, input, excludeId = 0) {
     [userId, excludeId],
   );
   const [busyRows] = await c.execute(
-    `SELECT d.day,COUNT(DISTINCT d.user_id) AS n FROM leave_days d JOIN leave_requests r ON r.id=d.request_id WHERE r.status IN ('pending','approved') AND r.user_id<>? AND d.day BETWEEN ? AND ? GROUP BY d.day`,
+    `SELECT d.day,COUNT(DISTINCT d.user_id) AS n FROM leave_days d JOIN leave_requests r ON r.id=d.request_id JOIN users u ON u.id=r.user_id WHERE u.role<>'ADMIN' AND r.status IN ('pending','approved') AND r.user_id<>? AND d.day BETWEEN ? AND ? GROUP BY d.day`,
     [userId, input.start_date, input.end_date],
   );
   const [quotas] = await c.execute(

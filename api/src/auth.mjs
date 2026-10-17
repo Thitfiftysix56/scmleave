@@ -2,6 +2,7 @@ import { pool } from './db.mjs';
 import { tokenHash } from './security.mjs';
 import { fail } from './validation.mjs';
 import { requestState } from './request-state.mjs';
+import { isStaff } from './roles.mjs';
 export function publicUser(u) {
   return {
     id: u.id,
@@ -38,3 +39,12 @@ export const requireRole =
     roles.includes(req.user.role)
       ? next()
       : next(Object.assign(new Error('คุณไม่มีสิทธิ์ใช้งานส่วนนี้'), { status: 403 }));
+export function requireStaff(req, res, next) {
+  return isStaff(req.user.role)
+    ? next()
+    : next(
+        Object.assign(new Error('Admin เป็นผู้ดูแลระบบ ไม่ต้องขอลาหรือบันทึกทำงานแทน'), {
+          status: 403,
+        }),
+      );
+}

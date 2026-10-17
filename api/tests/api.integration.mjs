@@ -22,6 +22,7 @@ const { migrate } = await import('../src/migrate.mjs');
 const { app } = await import('../src/app.mjs');
 const { todayTH, addDays, weekday } = await import('../src/dates.mjs');
 const { thaiHolidays } = await import('../src/holidays.mjs');
+const { hashPassword } = await import('../src/security.mjs');
 const client = request(app),
   year = Number(todayTH().slice(0, 4)) + 1;
 const members = {},
@@ -84,10 +85,11 @@ test('schema migration is idempotent and API health checks MySQL', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.status, 'ok');
   const [[roles]] = await pool.query('SELECT COUNT(*) AS n FROM roles');
-  assert.equal(roles.n, 3);
+  assert.equal(roles.n, 4);
 });
 test('bootstrap user must change password; old sessions are invalidated', async () => {
   const first = await login('admin@scm.test', initialPassword);
+  assert.equal(first.user.role, 'ADMIN');
   assert.equal(first.user.must_change_password, true);
   assert.equal((await auth(client.get('/api/meta'), first.token)).status, 403);
   const changed = await auth(client.post('/api/auth/password'), first.token).send({
@@ -98,17 +100,26 @@ test('bootstrap user must change password; old sessions are invalidated', async 
   assert.equal((await auth(client.get('/api/auth/me'), first.token)).status, 401);
   adminToken = (await login('admin@scm.test', mainPassword)).token;
 });
-test('signup cannot grant Super role, and pending users cannot login', async () => {
-  const r = await client
-    .post('/api/auth/register')
-    .send({
-      name: 'Forged admin',
-      email: 'forged@scm.test',
-      password: mainPassword,
-      role: 'SUPER_CS',
-      weekly_off: [0, 6],
-    });
+test('signup cannot grant Admin or Super roles, and pending users cannot login', async () => {
+  const r = await client.post('/api/auth/register').send({
+    name: 'Forged admin',
+    email: 'forged@scm.test',
+    password: mainPassword,
+    role: 'SUPER_CS',
+    weekly_off: [0, 6],
+  });
   assert.equal(r.status, 400);
+  assert.equal(
+    (
+      await client.post('/api/auth/register').send({
+        name: 'Forged Admin',
+        email: 'forged-admin@scm.test',
+        password: mainPassword,
+        role: 'ADMIN',
+      })
+    ).status,
+    400,
+  );
   for (const [key, role] of [
     ['cs1', 'CS'],
     ['cs2', 'CS'],
@@ -128,7 +139,7 @@ test('signup cannot grant Super role, and pending users cannot login', async () 
     .send({ email: members.cs1.email, password: members.cs1.password });
   assert.equal(denied.status, 403);
 });
-test('Super activates members; ordinary users cannot manage members', async () => {
+test('Admin activates members; ordinary users cannot manage members or create Admin', async () => {
   const all = (await auth(client.get('/api/admin/members'))).body.members;
   for (const [key, m] of Object.entries(members)) {
     m.id = all.find((u) => u.email === m.email).id;
@@ -143,9 +154,18 @@ test('Super activates members; ordinary users cannot manage members', async () =
     tokens[key] = (await login(m.email, m.password)).token;
   }
   assert.equal((await auth(client.get('/api/admin/members'), tokens.cs1)).status, 403);
+  assert.equal(
+    (
+      await auth(client.post('/api/admin/admins'), tokens.cs1).send({
+        name: 'No privilege',
+        email: 'denied@scm.test',
+      })
+    ).status,
+    403,
+  );
   assert.equal((await client.get('/api/calendar')).status, 401);
 });
-test('cannot demote the last active Super', async () => {
+test('cannot demote or deactivate the last active manager', async () => {
   const me = (await auth(client.get('/api/auth/me'))).body.user;
   const r = await auth(client.patch(`/api/admin/members/${me.id}`)).send({
     name: me.name,
@@ -155,6 +175,157 @@ test('cannot demote the last active Super', async () => {
     valid_from: todayTH(),
   });
   assert.equal(r.status, 409);
+  assert.equal(
+    (
+      await auth(client.patch(`/api/admin/members/${me.id}`)).send({
+        name: me.name,
+        role: 'ADMIN',
+        status: 'inactive',
+      })
+    ).status,
+    409,
+  );
+});
+test('Admin has no schedule or balance and cannot submit leave or coverage directly', async () => {
+  const me = (await auth(client.get('/api/auth/me'))).body.user;
+  const [[s]] = await pool.execute('SELECT COUNT(*) AS n FROM work_schedules WHERE user_id=?', [
+    me.id,
+  ]);
+  assert.equal(s.n, 0);
+  assert.deepEqual((await auth(client.get('/api/meta'))).body.schedules, []);
+  assert.deepEqual((await auth(client.get('/api/balances'))).body.balances, []);
+  assert.equal(
+    (await auth(client.post('/api/leaves/preview')).send({ input: payload() })).status,
+    403,
+  );
+  assert.equal((await sendLeave(adminToken, payload())).status, 403);
+  assert.equal(
+    (
+      await auth(client.post('/api/coverage')).send({
+        covers_user_id: members.cs1.id,
+        day: friday,
+        hours: 8,
+        requested_ot: false,
+        reason: 'Admin should not cover',
+      })
+    ).status,
+    403,
+  );
+  const balances = await auth(client.put(`/api/admin/members/${me.id}/entitlements/${year}`)).send(
+    ['annual', 'personal', 'sick'].map((leave_type) => ({ leave_type, quota: 10 })),
+  );
+  assert.equal(balances.status, 400);
+  const people = await auth(client.get('/api/people'));
+  assert.equal(
+    people.body.members.some((m) => m.id === me.id),
+    false,
+  );
+  const coverAdmin = await auth(client.post('/api/coverage'), tokens.cs1).send({
+    covers_user_id: me.id,
+    day: friday,
+    hours: 8,
+    requested_ot: false,
+    reason: 'Cannot cover Admin',
+  });
+  assert.equal(coverAdmin.status, 400);
+});
+test('an existing account can become Admin without off days and retains its password and history', async () => {
+  const password = 'Legacy-' + randomBytes(12).toString('hex');
+  const hash = await hashPassword(password);
+  const [r] = await pool.execute(
+    "INSERT INTO users(name,email,password_hash,role,status) VALUES('Existing Super','legacy@scm.test',?,'SUPER_CS','active')",
+    [hash],
+  );
+  const id = r.insertId;
+  await pool.execute('INSERT INTO work_schedules(user_id,valid_from,weekly_off) VALUES(?,?,?)', [
+    id,
+    `${year - 2}-01-01`,
+    '[5,6]',
+  ]);
+  await migrate();
+  const legacy = await login('legacy@scm.test', password);
+  assert.equal(legacy.user.role, 'SUPER_CS');
+  assert.equal((await auth(client.get('/api/admin/members'), legacy.token)).status, 200);
+  assert.equal(
+    (
+      await auth(client.patch(`/api/admin/members/${id}`), legacy.token).send({
+        name: 'Existing Admin',
+        role: 'ADMIN',
+        status: 'active',
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await auth(client.get('/api/auth/me'), legacy.token)).status, 401);
+  let updated = await login('legacy@scm.test', password);
+  assert.equal(updated.user.role, 'ADMIN');
+  assert.deepEqual((await auth(client.get('/api/meta'), updated.token)).body.schedules, []);
+  const [[history]] = await pool.execute(
+    'SELECT COUNT(*) AS n FROM work_schedules WHERE user_id=?',
+    [id],
+  );
+  assert.equal(history.n, 1);
+  const cal = await auth(client.get(`/api/calendar?start=${year}-01-01&end=${year + 1}-01-01`));
+  assert.equal(
+    cal.body.members.some((m) => m.id === id),
+    false,
+  );
+  assert.equal(
+    cal.body.events.some((e) => e.extendedProps.user_id === id),
+    false,
+  );
+  assert.equal(
+    (
+      await auth(client.patch(`/api/admin/members/${id}`)).send({
+        name: 'Existing Super',
+        role: 'SUPER_CS',
+        status: 'active',
+        weekly_off: [0, 6],
+        valid_from: todayTH(),
+      })
+    ).status,
+    200,
+  );
+  updated = await login('legacy@scm.test', password);
+  assert.equal(updated.user.role, 'SUPER_CS');
+  members.super = { id, email: 'legacy@scm.test', password, role: 'SUPER_CS' };
+  tokens.super = updated.token;
+});
+test('manager creates an Admin without a schedule and a one-time password that must be changed', async () => {
+  const created = await auth(client.post('/api/admin/admins'), tokens.super).send({
+    name: 'Second Admin',
+    email: 'second-admin@scm.test',
+  });
+  assert.equal(created.status, 201);
+  const first = await login('second-admin@scm.test', created.body.temporaryPassword);
+  assert.equal(first.user.role, 'ADMIN');
+  assert.equal(first.user.must_change_password, true);
+  assert.equal((await auth(client.get('/api/admin/members'), first.token)).status, 403);
+  const [[s]] = await pool.execute('SELECT COUNT(*) AS n FROM work_schedules WHERE user_id=?', [
+    created.body.id,
+  ]);
+  assert.equal(s.n, 0);
+  const password = 'NewAdmin-' + randomBytes(12).toString('hex');
+  assert.equal(
+    (
+      await auth(client.post('/api/auth/password'), first.token).send({
+        currentPassword: created.body.temporaryPassword,
+        newPassword: password,
+      })
+    ).status,
+    200,
+  );
+  const fresh = await login('second-admin@scm.test', password);
+  assert.equal((await auth(client.get('/api/admin/members'), fresh.token)).status, 200);
+  assert.equal(
+    (
+      await auth(client.post('/api/admin/admins')).send({
+        name: 'Duplicate',
+        email: 'second-admin@scm.test',
+      })
+    ).status,
+    409,
+  );
 });
 test('unconfirmed holiday calendar rejects planned leave, then Super confirms years', async () => {
   const blocked = await sendLeave(tokens.cs1, payload());
@@ -381,6 +552,16 @@ test('configured zero annual quota is enforced and pending leave prevents schedu
     valid_from: todayTH(),
   });
   assert.equal(change.status, 409);
+  assert.equal(
+    (
+      await auth(client.patch(`/api/admin/members/${members.cs2.id}`)).send({
+        name: 'cs2',
+        role: 'ADMIN',
+        status: 'active',
+      })
+    ).status,
+    409,
+  );
   const addHoliday = await auth(client.post('/api/admin/holidays')).send({
     day: addDays(friday, 1),
     name: 'Unreviewed special day',
@@ -390,16 +571,26 @@ test('configured zero annual quota is enforced and pending leave prevents schedu
 });
 test('Super cannot approve own leave request', async () => {
   const submitted = await sendLeave(
-    adminToken,
+    tokens.super,
     payload({ start_date: otherMonday, end_date: otherMonday }),
   );
   assert.equal(submitted.status, 201, JSON.stringify(submitted.body));
-  const r = await auth(client.post(`/api/leaves/${submitted.body.id}/review`)).send({
+  const r = await auth(client.post(`/api/leaves/${submitted.body.id}/review`), tokens.super).send({
     decision: 'approved',
     note: 'Self approval attempted',
     allow_exception: false,
   });
   assert.equal(r.status, 403);
+  assert.equal(
+    (
+      await auth(client.post(`/api/leaves/${submitted.body.id}/review`)).send({
+        decision: 'approved',
+        note: 'Admin reviews Super request',
+        allow_exception: false,
+      })
+    ).status,
+    200,
+  );
   assert.equal(
     (await auth(client.post(`/api/leaves/${submitted.body.id}/cancel`)).send({})).status,
     200,
@@ -419,6 +610,10 @@ test('OT requires a different Store authorizer and Super approval; creates no co
     id = pending[0].id;
   assert.equal(
     (await auth(client.post(`/api/coverage/${id}/store-authorize`), tokens.cs1).send({})).status,
+    403,
+  );
+  assert.equal(
+    (await auth(client.post(`/api/coverage/${id}/store-authorize`)).send({})).status,
     403,
   );
   assert.equal(

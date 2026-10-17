@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded';
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
-import { api, LEAVE_LABEL, today, displayDate } from './api';
+import { api, LEAVE_LABEL, today, displayDate, isManager } from './api';
 import { SelectField, Status, Loading } from './ui';
 const initial = () => ({
   leave_type: 'annual',
@@ -132,7 +132,7 @@ export function LeaveForm({ open, onClose, onSaved, notify, dates }) {
             value={form.reason}
             onChange={(e) => change('reason', e.target.value)}
             inputProps={{ maxLength: 2000 }}
-            helperText="เจ้าของคำขอและ Super Customer Service เท่านั้นที่เห็นเหตุผล"
+            helperText="เจ้าของคำขอ Admin และ Super Customer Service เท่านั้นที่เห็นเหตุผล"
           />
           {form.leave_type === 'sick' && (
             <Box sx={{ border: '1px dashed #c4cdd5', p: 2, borderRadius: 2, bgcolor: '#f9fafb' }}>
@@ -204,7 +204,9 @@ export function LeaveForm({ open, onClose, onSaved, notify, dates }) {
                   onChange={(e) => change('exception_requested', e.target.checked)}
                 />
               }
-              label={<Typography variant="body2">ขอให้ Super พิจารณาอนุมัติพิเศษ</Typography>}
+              label={
+                <Typography variant="body2">ขอให้ Admin / Super พิจารณาอนุมัติพิเศษ</Typography>
+              }
             />
             {form.exception_requested && (
               <TextField
@@ -323,8 +325,7 @@ export function LeaveDetails({ id, onClose, user, notify, onSaved }) {
       setBusy(false);
     }
   }
-  const canReview =
-    r && user.role === 'SUPER_CS' && r.user_id !== user.id && r.status === 'pending';
+  const canReview = r && isManager(user.role) && r.user_id !== user.id && r.status === 'pending';
   return (
     <Dialog open={Boolean(id)} onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
       <DialogTitle>คำขอลา #{id}</DialogTitle>
@@ -440,7 +441,7 @@ export function LeaveDetails({ id, onClose, user, notify, onSaved }) {
                 </>
               )}
               {['pending', 'approved'].includes(r.status) &&
-                (r.user_id === user.id || user.role === 'SUPER_CS') && (
+                (r.user_id === user.id || isManager(user.role)) && (
                   <>
                     <Divider />
                     <Button

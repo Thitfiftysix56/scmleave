@@ -46,10 +46,13 @@ export async function api(path, { method = 'GET', body, blob = false, signal } =
 }
 export const LEAVE_LABEL = { annual: 'ลาพักร้อน', personal: 'ลากิจ', sick: 'ลาป่วย' };
 export const ROLE_LABEL = {
+  ADMIN: 'Admin',
   SUPER_CS: 'Super Customer Service',
   CS: 'Customer Service',
   STORE: 'Store',
 };
+export const isManager = (role) => ['ADMIN', 'SUPER_CS'].includes(role);
+export const isStaff = (role) => ['SUPER_CS', 'CS', 'STORE'].includes(role);
 export const STATUS_LABEL = {
   pending: 'รออนุมัติ',
   approved: 'อนุมัติแล้ว',

@@ -36,7 +36,13 @@ function previousDay(s) {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
-export default function CalendarPage({ version, onCreate, onDetails, notify }) {
+export default function CalendarPage({
+  version,
+  onCreate,
+  onDetails,
+  notify,
+  canRequestLeave = true,
+}) {
   const ref = useRef(null),
     [range, setRange] = useState(null),
     [data, setData] = useState({ events: [], members: [], holidayYears: [] }),
@@ -88,9 +94,11 @@ export default function CalendarPage({ version, onCreate, onDetails, notify }) {
         title="ปฏิทินของทีม"
         subtitle="วันหยุดที่ต่างกัน วางแผนร่วมกันได้ในปฏิทินเดียว"
         action={
-          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => onCreate()}>
-            สร้างคำขอลา
-          </Button>
+          canRequestLeave && (
+            <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => onCreate()}>
+              สร้างคำขอลา
+            </Button>
+          )
         }
       />
       <Box
@@ -105,7 +113,7 @@ export default function CalendarPage({ version, onCreate, onDetails, notify }) {
           [
             'สมาชิกในทีม',
             data.members.length,
-            'CS และ Store รวมในโควตาเดียว',
+            'Super CS, CS และ Store · ไม่นับ Admin',
             PeopleAltRoundedIcon,
             '#00a76f',
           ],
@@ -284,7 +292,7 @@ export default function CalendarPage({ version, onCreate, onDetails, notify }) {
             fixedWeekCount={false}
             events={filtered}
             editable={false}
-            selectable
+            selectable={canRequestLeave}
             selectMirror
             datesSet={(v) => {
               const next = { start: v.startStr.slice(0, 10), end: v.endStr.slice(0, 10) };
@@ -295,6 +303,7 @@ export default function CalendarPage({ version, onCreate, onDetails, notify }) {
               ref.current.getApi().unselect();
             }}
             dateClick={(v) =>
+              canRequestLeave &&
               onCreate({ start_date: v.dateStr.slice(0, 10), end_date: v.dateStr.slice(0, 10) })
             }
             eventClick={(v) => {
@@ -307,7 +316,9 @@ export default function CalendarPage({ version, onCreate, onDetails, notify }) {
       </Card>
       <Typography variant="caption" color="text.secondary" display="block" mt={2}>
         ศุกร์–อาทิตย์ลาเพิ่มได้ 1 คนต่อวัน รวม Store · วันหยุดปกติไม่หักโควตานี้ ·
-        คลิกวันที่หรือลากช่วงวันเพื่อขอลา
+        {canRequestLeave
+          ? 'คลิกวันที่หรือลากช่วงวันเพื่อขอลา'
+          : 'Admin ดูแลระบบโดยไม่ถูกนับในกำลังคนของทีม'}
       </Typography>
     </>
   );

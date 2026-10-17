@@ -213,7 +213,7 @@ export function Auth({ onLogin }) {
             </Button>
             <Typography variant="caption" color="text.secondary" align="center">
               {tab === 0
-                ? 'ลืมรหัสผ่าน? ติดต่อ Super Customer Service เพื่อรับรหัสชั่วคราว'
+                ? 'ลืมรหัสผ่าน? ติดต่อ Admin / Super Customer Service เพื่อรับรหัสชั่วคราว'
                 : 'บัญชีใหม่ไม่มีสิทธิ์อนุมัติหรือเปลี่ยนตำแหน่งตนเอง'}
             </Typography>
           </Stack>
